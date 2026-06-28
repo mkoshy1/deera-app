@@ -2,7 +2,7 @@
 import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { db, auth } from "@/app/firebase"; 
-import { collection, getDocs, addDoc, doc, getDoc, setDoc, query, where, updateDoc, deleteDoc } from "firebase/firestore";
+import { collection, getDocs, addDoc, doc, getDoc, setDoc, query, where, updateDoc, deleteDoc, limit } from "firebase/firestore";
 import { onAuthStateChanged } from "firebase/auth";
 import { motion, PanInfo, useMotionValue, useTransform, animate } from "framer-motion";
 
@@ -70,9 +70,11 @@ export default function Discover() {
           const myPassesSnapshot = await getDocs(myPassesQuery);
           myPassesSnapshot.forEach(doc => interactedIds.add(doc.data().toUserId));
 
-          const usersSnapshot = await getDocs(collection(db, "users"));
-          const usersList: any[] = [];
-          
+        // جيب أول 20 مستخدم فقط (تقدر تزيد الرقم إذا تريد)
+const usersQuery = query(collection(db, "users"), limit(20)); 
+const usersSnapshot = await getDocs(usersQuery);
+const usersList: any[] = [];
+
           usersSnapshot.forEach((doc) => {
             if (doc.id !== loggedInUser.uid && !interactedIds.has(doc.id)) {
               const data = doc.data();
