@@ -2,7 +2,7 @@
 import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { db, auth } from "@/app/firebase"; 
-import { collection, query, where, getDocs, doc, getDoc, setDoc, updateDoc } from "firebase/firestore";
+import { collection, query, where, getDocs, doc, getDoc, setDoc, updateDoc, limit } from "firebase/firestore";
 import { onAuthStateChanged } from "firebase/auth";
 
 export default function Notifications() {
@@ -12,49 +12,58 @@ export default function Notifications() {
   const [loading, setLoading] = useState(true);
   const [canView, setCanView] = useState(false); 
 
-  useEffect(() => {
-    const unsubscribe = onAuthStateChanged(auth, async (user) => {
-      if (user) {
-        try {
-          const userDoc = await getDoc(doc(db, "users", user.uid));
-          const role = userDoc.exists() ? userDoc.data().role : "user";
-          if (role === "admin" || role === "vip") {
-            setCanView(true);
-          }
+useEffect(() => {
+  const unsubscribe = onAuthStateChanged(auth, async (user) => {
+    if (user) {
+      try {
+        // 1. فحص الصلاحيات
+        const userDoc = await getDoc(doc(db, "users", user.uid));
+        const role = userDoc.exists() ? userDoc.data().role : "user";
+        if (role === "admin" || role === "vip") setCanView(true);
 
-          const likesQuery = query(collection(db, "likes"), where("toUserId", "==", user.uid));
-          const likesSnapshot = await getDocs(likesQuery);
-          
-          const likesData: any[] = [];
-          
-          for (const likeDoc of likesSnapshot.docs) {
-            const likeInfo = likeDoc.data();
-            const senderDoc = await getDoc(doc(db, "users", likeInfo.fromUserId));
-            
-            if (senderDoc.exists()) {
-              likesData.push({
-                id: likeDoc.id, 
-                senderId: senderDoc.id,
-                ...senderDoc.data() 
-              });
-            }
-          }
-
-          setLikes(likesData);
+        // 2. جلب الإشعارات (مع تحديد العدد)
+        const likesQuery = query(
+          collection(db, "likes"), 
+          where("toUserId", "==", user.uid),
+          limit(10) // <-- تحديد العدد هنا ضروري للسرعة
+        );
+        const likesSnapshot = await getDocs(likesQuery);
+        
+        if (likesSnapshot.empty) {
           setLoading(false);
-
-        } catch (error) {
-          console.error("خطأ في جلب الإشعارات:", error);
-          setLoading(false);
+          return;
         }
-      } else {
-        router.push("/");
+
+        // 3. استخراج الـ IDs للمرسلين فقط
+        const senderIds = likesSnapshot.docs.map(d => d.data().fromUserId);
+        
+        // 4. جلب بيانات جميع المرسلين بطلب واحد (Query واحد)
+        const usersSnapshot = await getDocs(query(collection(db, "users"), where("__name__", "in", senderIds)));
+        
+        // 5. دمج البيانات
+        const likesData = likesSnapshot.docs.map(likeDoc => {
+          const likeInfo = likeDoc.data();
+          const senderData = usersSnapshot.docs.find(u => u.id === likeInfo.fromUserId)?.data();
+          return {
+            id: likeDoc.id,
+            senderId: likeInfo.fromUserId,
+            ...senderData
+          };
+        });
+
+        setLikes(likesData);
+        setLoading(false);
+      } catch (error) {
+        console.error("خطأ في جلب الإشعارات:", error);
+        setLoading(false);
       }
-    });
+    } else {
+      router.push("/");
+    }
+  });
 
-    return () => unsubscribe();
-  }, [router]);
-
+  return () => unsubscribe();
+}, [router]);
   // دالة الترقية الفورية من داخل صفحة الإشعارات
   const handleUpgradeToVIP = async () => {
     const loggedInUser = auth.currentUser;
